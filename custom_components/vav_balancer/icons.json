@@ -1,0 +1,52 @@
+{
+  "entity": {
+    "fan": {
+      "balancer": {
+        "default": "mdi:fan-auto"
+      }
+    },
+    "sensor": {
+      "target_intake_flow": {
+        "default": "mdi:fan-chevron-up"
+      },
+      "actual_intake_flow": {
+        "default": "mdi:fan"
+      },
+      "target_exhaust_flow": {
+        "default": "mdi:fan-chevron-down"
+      },
+      "actual_exhaust_flow": {
+        "default": "mdi:fan"
+      },
+      "requested_exhaust_flow": {
+        "default": "mdi:fan-alert"
+      },
+      "target_delta": {
+        "default": "mdi:gauge"
+      },
+      "actual_delta": {
+        "default": "mdi:gauge"
+      },
+      "fan_target_flow": {
+        "default": "mdi:fan-chevron-up"
+      },
+      "fan_actual_flow": {
+        "default": "mdi:fan"
+      }
+    },
+    "binary_sensor": {
+      "night_mode": {
+        "default": "mdi:weather-night",
+        "state": {
+          "off": "mdi:weather-sunny"
+        }
+      },
+      "home_mode": {
+        "default": "mdi:home-account",
+        "state": {
+          "off": "mdi:home-export-outline"
+        }
+      }
+    }
+  }
+}

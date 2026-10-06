@@ -1,0 +1,13 @@
+{
+  "domain": "vav_balancer",
+  "name": "VAV Ventilation Balancer",
+  "codeowners": ["@archiespb"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/archiespb/vav_balancer",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/archiespb/vav_balancer/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

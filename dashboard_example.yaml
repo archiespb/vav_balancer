@@ -1,0 +1,95 @@
+title: VAV Balancer
+views:
+  - title: Vентиляция
+    path: vav-balancer
+    icon: mdi:fan-auto
+    cards:
+      # --- Overview -----------------------------------------------------
+      - type: glance
+        title: Режим
+        entities:
+          - entity: fan.vav_balancer
+            name: Балансировщик
+          - entity: binary_sensor.vav_balancer_night_mode
+            name: Ночь
+          - entity: binary_sensor.vav_balancer_home_mode
+            name: Дома
+
+      # --- Target vs actual airflow (graph) ------------------------------
+      - type: history-graph
+        title: Приток и вытяжка — цель и факт
+        hours_to_show: 24
+        entities:
+          - entity: sensor.vav_balancer_target_intake_flow
+            name: Цель, приток
+          - entity: sensor.vav_balancer_actual_intake_flow
+            name: Факт, приток
+          - entity: sensor.vav_balancer_target_exhaust_flow
+            name: Цель, вытяжка
+          - entity: sensor.vav_balancer_actual_exhaust_flow
+            name: Факт, вытяжка
+
+      # --- Pressure balance (should hover around / above zero) ----------
+      - type: history-graph
+        title: Баланс давления (дельта)
+        hours_to_show: 24
+        entities:
+          - entity: sensor.vav_balancer_target_delta
+            name: Цель
+          - entity: sensor.vav_balancer_actual_delta
+            name: Факт
+
+      # --- Current numbers at a glance ------------------------------------
+      - type: entities
+        title: Текущие показатели
+        entities:
+          - entity: sensor.vav_balancer_target_intake_flow
+          - entity: sensor.vav_balancer_actual_intake_flow
+          - entity: sensor.vav_balancer_target_exhaust_flow
+          - entity: sensor.vav_balancer_actual_exhaust_flow
+          - entity: sensor.vav_balancer_actual_delta
+
+      # --- Per-fan cards ---------------------------------------------------
+      # Duplicate this block for every configured fan. The object_id
+      # (the "_in1" / "_bedroom_fan" part) matches the fan's own entity_id,
+      # e.g. fan.tion_4s_bedroom_fan -> sensor.vav_balancer_target_flow_tion_4s_bedroom_fan.
+      # Check Developer tools -> States for the exact names in your system.
+      - type: entities
+        title: Вентилятор — <object_id>
+        entities:
+          - entity: sensor.vav_balancer_target_flow_<object_id>
+            name: Цель
+          - entity: sensor.vav_balancer_actual_flow_<object_id>
+            name: Факт
+          - entity: fan.<object_id>
+
+      # Sensors/thresholds in play for that fan, read straight from the
+      # target sensor's attributes (sensor, mode, threshold + its source,
+      # output, whether the rule is currently active).
+      - type: markdown
+        title: Правила — <object_id>
+        content: |
+          {% set st = states.sensor.vav_balancer_target_flow_<object_id> %}
+          {% if st and st.attributes.rules %}
+          | Датчик | Режим | Порог | Источник порога | Выход | Активно |
+          |---|---|---|---|---|---|
+          {% for r in st.attributes.rules %}
+          | {{ r.sensor }} | {{ r.mode }} | {{ r.threshold }} | {{ r.threshold_source }} | {{ r.output }} | {{ '✅' if r.active else '—' }} |
+          {% endfor %}
+          {% else %}
+          Правил не задано.
+          {% endif %}
+
+      # --- Diagnostics ------------------------------------------------------
+      - type: markdown
+        title: Диагностика
+        content: >
+          **Причина последнего пересчёта:** {{ state_attr('fan.vav_balancer', 'last_reason') }}
+
+          **Последний расчёт:** {{ state_attr('fan.vav_balancer', 'last_calculation') }}
+
+          **Последняя отправка команд:** {{ state_attr('fan.vav_balancer', 'last_execution') }}
+
+          **Последние команды:** {{ state_attr('fan.vav_balancer', 'last_commands') }}
+
+          **Заметки балансировщика:** {{ state_attr('fan.vav_balancer', 'notes') }}

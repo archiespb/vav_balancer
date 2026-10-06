@@ -1,0 +1,9 @@
+services:
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    working_dir: /app
+    volumes:
+      - .:/app
+      - /app/venv     # прячем Windows-venv, чтобы он не мешал внутри Linux
