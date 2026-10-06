@@ -4,7 +4,7 @@
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
 [![Validate](https://img.shields.io/github/actions/workflow/status/archiespb/vav_balancer/validate.yml?label=validate)](https://github.com/archiespb/vav_balancer/actions/workflows/validate.yml)
 [![License](https://img.shields.io/github/license/archiespb/vav_balancer)](LICENSE)
-[![HA Version](https://img.shields.io/badge/Home%20Assistant-2024.12%2B-blue)](HA Version)
+![HA Version](https://img.shields.io/badge/Home%20Assistant-2024.12%2B-blue)
 
 ![GitHub commits since latest release](https://img.shields.io/github/commits-since/archiespb/vav_balancer/latest?style=plastic)
 ![GitHub commit activity](https://img.shields.io/github/commit-activity/m/archiespb/vav_balancer?style=plastic)
