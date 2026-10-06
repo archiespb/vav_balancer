@@ -12,7 +12,19 @@ Requires Home Assistant **2024.12** or newer.
 
 ## Installation
 
-1. Copy the `custom_components/vav_balancer` folder into your Home Assistant's `config/custom_components/` directory (or install it via HACS as a custom repository).
+### Via HACS
+
+This integration isn't in the HACS default store yet, so add it as a custom repository:
+
+1. **HACS → Integrations → ⋮ (top right) → Custom repositories**.
+2. Enter the repository URL (`https://github.com/archiespb/vav_balancer`), set **Category** to **Integration**, and click **Add**.
+3. Find **VAV Ventilation Balancer** in HACS and click **Download**.
+4. Restart Home Assistant.
+5. **Settings → Devices & services → Add integration → VAV Ventilation Balancer**.
+
+### Manual
+
+1. Copy the `custom_components/vav_balancer` folder into your Home Assistant's `config/custom_components/` directory.
 2. Restart Home Assistant.
 3. **Settings → Devices & services → Add integration → VAV Ventilation Balancer**.
 
@@ -72,7 +84,3 @@ For a bug report: **Settings → Devices & services → VAV Ventilation Balancer
 ## Development and tests
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Regarding AI Usage
-
-A significant portion of the code was written with the help of an AI assistant (Claude, Anthropic) under the author's guidance. The author was responsible for the architecture, requirements, and testing on actual hardware. The code was manually reviewed, but—like any other code—it may contain errors; please report them via the Issues section.
