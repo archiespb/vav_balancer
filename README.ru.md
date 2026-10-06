@@ -1,5 +1,17 @@
 # VAV Ventilation Balancer для Home Assistant
 
+[![GitHub release](https://img.shields.io/github/v/release/archiespb/vav_balancer)](https://github.com/archiespb/vav_balancer/releases)
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
+[![Validate](https://img.shields.io/github/actions/workflow/status/archiespb/vav_balancer/validate.yml?label=validate)](https://github.com/archiespb/vav_balancer/actions/workflows/validate.yml)
+[![License](https://img.shields.io/github/license/archiespb/vav_balancer)](LICENSE)
+[![HA Version](https://img.shields.io/badge/Home%20Assistant-2024.12%2B-blue)](HA Version)
+
+![GitHub commits since latest release](https://img.shields.io/github/commits-since/archiespb/vav_balancer/latest?style=plastic)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/m/archiespb/vav_balancer?style=plastic)
+![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/archiespb/vav_balancer/ci.yml?style=plastic)
+
+[![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=archiespb&repository=vav_balancer&category=integration)
+
 [English version](README.md)
 
 <img src="https://raw.githubusercontent.com/archiespb/vav_balancer/main/custom_components/vav_balancer/brand/icon@2x.png" width="128" alt="VAV Balancer">
