@@ -2,6 +2,8 @@
 
 [Русская версия](README.ru.md)
 
+<img src="https://raw.githubusercontent.com/archiespb/vav_balancer/main/custom_components/vav_balancer/brand/icon@2x.png" width="128" alt="VAV Balancer">
+
 A generic, asynchronous intake/exhaust ventilation (VAV — Variable Air Volume) balancer with full step-by-step UI configuration. The integration isn't tied to specific rooms, fan models, or sensor types: intake and exhaust are assembled from whichever `fan` entities already exist in your Home Assistant, and their behaviour is defined entirely through the config wizard — no YAML required.
 
 Highlights: any number of intake and exhaust fans (step- or percentage-controlled), sensor rules with dynamic thresholds (including another sensor's live value as the threshold), debounce and hysteresis against chattering at a threshold, day/night ceilings, a "read-only" mode for autonomous fans, continuous intake↔exhaust balance with protection against imbalance, configuration export/import, ready-made sensors for dashboard graphs, and one-click diagnostics.
