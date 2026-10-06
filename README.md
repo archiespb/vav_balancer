@@ -98,3 +98,7 @@ For a bug report: **Settings → Devices & services → VAV Ventilation Balancer
 ## Development and tests
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Regarding AI Usage
+
+A significant portion of the code was written with the help of an AI assistant (Claude, Anthropic) under the author's guidance. The author was responsible for the architecture, requirements, and testing on actual hardware. The code was manually reviewed, but—like any other code—it may contain errors; please report them via the Issues section.
