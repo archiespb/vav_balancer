@@ -63,7 +63,7 @@ async def _advance_through_wizard(hass: HomeAssistant, flow_id: str) -> dict:
         {
             "min_home_step": 1, "min_away_step": 0, "min_home_pct": 20,
             "min_away_pct": 0, "interval": 30, "pressure_tolerance": 15,
-            "max_correction_seconds": 180,
+            "max_correction_seconds": 180, "boost_minutes": 15,
         },
     )
     return result
@@ -341,9 +341,32 @@ async def test_options_wizard_reconfigure_keeps_other_fan(hass: HomeAssistant) -
         {
             "min_home_step": 1, "min_away_step": 0, "min_home_pct": 20,
             "min_away_pct": 0, "interval": 45, "pressure_tolerance": 20,
-            "max_correction_seconds": 120,
+            "max_correction_seconds": 120, "boost_minutes": 10,
         },
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"]["interval"] == 45
     assert result["data"]["intake_profiles"]["fan.in1"]["airflow_map"] == [0, 40, 80]
+
+async def test_fan_template_prefills_airflow_map(hass: HomeAssistant) -> None:
+    """Picking a template sets the *default* shown on the next screen;
+    it does not silently finalize the value -- the user still submits it."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "wizard"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"intake_fans": ["fan.in1"], "exhaust_fans": []}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"control_type": "steps"}
+    )
+    assert result["step_id"] == "fan_template"
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"template": "tion_4s"}
+    )
+    assert result["step_id"] == "fan_performance"
+    prefilled = result["data_schema"]({})["airflow_map"]
+    assert prefilled == "0,30,45,60,75,90,140"
