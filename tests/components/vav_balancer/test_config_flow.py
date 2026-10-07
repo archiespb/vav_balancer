@@ -21,6 +21,11 @@ async def _advance_through_wizard(hass: HomeAssistant, flow_id: str) -> dict:
     result = await hass.config_entries.flow.async_configure(
         flow_id, {"control_type": "steps", "read_only": False}
     )
+    assert result["step_id"] == "fan_template"
+
+    result = await hass.config_entries.flow.async_configure(
+       flow_id, {"template": "tion_4s"}
+    )
     assert result["step_id"] == "fan_performance"
 
     result = await hass.config_entries.flow.async_configure(
@@ -128,6 +133,11 @@ async def test_invalid_airflow_map_shows_error(hass: HomeAssistant) -> None:
     )
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"control_type": "steps"}
+    )
+    assert result["step_id"] == "fan_template"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {}  # no template -> blank start
     )
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"airflow_map": "30,10,5"}  # decreasing -> invalid
@@ -304,6 +314,11 @@ async def test_options_wizard_reconfigure_keeps_other_fan(hass: HomeAssistant) -
     assert result["step_id"] == "fan_type"
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"control_type": "steps", "read_only": False}
+    )
+    assert result["step_id"] == "fan_template"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {}
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"airflow_map": "0,40,80", "day_max": 1}
