@@ -1,0 +1,13 @@
+boost:
+  fields:
+    duration:
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: box
+
+cancel_boost:

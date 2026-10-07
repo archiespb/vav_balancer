@@ -47,6 +47,27 @@
           "off": "mdi:home-export-outline"
         }
       }
+    },
+    "button": {
+      "boost": {
+        "default": "mdi:fan-plus"
+      }
+    },
+    "number": {
+      "pressure_tolerance": {
+        "default": "mdi:gauge"
+      },
+      "max_correction_seconds": {
+        "default": "mdi:timer-alert"
+      }
+    },
+    "switch": {
+      "fan_active": {
+        "default": "mdi:fan-auto",
+        "state": {
+          "off": "mdi:fan-off"
+        }
+      }
     }
   }
 }

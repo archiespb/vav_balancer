@@ -33,6 +33,8 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    AIRFLOW_TEMPLATES,
+    CONF_BOOST_MINUTES,
     CONF_EXHAUST_FANS,
     CONF_EXHAUST_PROFILES,
     CONF_INTAKE_FANS,
@@ -49,6 +51,7 @@ from .const import (
     CONF_PRESSURE_TOLERANCE,
     CONTROL_PERCENTAGE,
     CONTROL_STEPS,
+    DEFAULT_BOOST_MINUTES,
     DEFAULT_INTERVAL,
     DEFAULT_MAX_CORRECTION_SECONDS,
     DEFAULT_MIN_AWAY_PCT,
@@ -60,11 +63,13 @@ from .const import (
     DOMAIN,
     FORM_ADD_ANOTHER,
     FORM_RESET_RULES,
+    MAX_BOOST_MINUTES,
     MAX_CORRECTION_SECONDS_LIMIT,
     MAX_INTERVAL,
     MAX_PRESSURE_TOLERANCE,
     MAX_RULE_DELAY,
     MAX_RULE_HYSTERESIS,
+    MIN_BOOST_MINUTES,
     MIN_CORRECTION_SECONDS,
     MIN_INTERVAL,
     MIN_PRESSURE_TOLERANCE,
@@ -107,7 +112,7 @@ _EXPORT_KEYS: tuple[str, ...] = (
     CONF_INTAKE_FANS, CONF_EXHAUST_FANS, CONF_INTAKE_PROFILES, CONF_EXHAUST_PROFILES,
     CONF_PRESENCE, CONF_MIN_HOME_STEP, CONF_MIN_AWAY_STEP, CONF_MIN_HOME_PCT,
     CONF_MIN_AWAY_PCT, CONF_NIGHT_START, CONF_NIGHT_END, CONF_INTERVAL,
-    CONF_PRESSURE_TOLERANCE, CONF_MAX_CORRECTION_SECONDS,
+    CONF_PRESSURE_TOLERANCE, CONF_MAX_CORRECTION_SECONDS, CONF_BOOST_MINUTES,
 )
 
 
@@ -167,6 +172,9 @@ def _validate_full_config(data: Any) -> list[str]:
     _num(CONF_INTERVAL, MIN_INTERVAL, MAX_INTERVAL)
     _num(CONF_PRESSURE_TOLERANCE, MIN_PRESSURE_TOLERANCE, MAX_PRESSURE_TOLERANCE)
     _num(CONF_MAX_CORRECTION_SECONDS, MIN_CORRECTION_SECONDS, MAX_CORRECTION_SECONDS_LIMIT)
+    # Optional: configs exported before this field existed won't have it.
+    if CONF_BOOST_MINUTES in data:
+        _num(CONF_BOOST_MINUTES, MIN_BOOST_MINUTES, MAX_BOOST_MINUTES)
 
     for key in (CONF_PRESENCE, CONF_NIGHT_START, CONF_NIGHT_END):
         value = data.get(key)
@@ -343,6 +351,8 @@ class VAVFlowMixin:
                 self._draft[PROF_RULES] = []
             self._draft[PROF_CONTROL_TYPE] = new_type
             self._draft[PROF_READ_ONLY] = bool(user_input.get(PROF_READ_ONLY, False))
+            if new_type == CONTROL_STEPS:
+                return await self.async_step_fan_template()
             return await self.async_step_fan_performance()
 
         schema = vol.Schema(
@@ -358,6 +368,31 @@ class VAVFlowMixin:
         )
         return self.async_show_form(  # type: ignore[attr-defined]
             step_id="fan_type", data_schema=schema,
+            description_placeholders=self._placeholders(),
+        )
+
+    async def async_step_fan_template(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Optional starting point for a step fan's airflow map.
+
+        Purely a convenience prefill: picking one just sets the default
+        text shown on the next (fan_performance) step, which stays fully
+        editable before being submitted -- nothing is saved here.
+        """
+        if user_input is not None:
+            template = user_input.get("template")
+            if template and template in AIRFLOW_TEMPLATES:
+                self._draft[PROF_AIRFLOW_MAP] = parse_airflow_map(
+                    AIRFLOW_TEMPLATES[template]
+                )
+            return await self.async_step_fan_performance()
+
+        schema = vol.Schema(
+            {vol.Optional("template"): _select(list(AIRFLOW_TEMPLATES), "airflow_template")}
+        )
+        return self.async_show_form(  # type: ignore[attr-defined]
+            step_id="fan_template", data_schema=schema,
             description_placeholders=self._placeholders(),
         )
 
@@ -612,6 +647,7 @@ class VAVFlowMixin:
                 self._data[CONF_MAX_CORRECTION_SECONDS] = int(
                     user_input[CONF_MAX_CORRECTION_SECONDS]
                 )
+                self._data[CONF_BOOST_MINUTES] = float(user_input[CONF_BOOST_MINUTES])
                 _LOGGER.info("Config flow: global variables stored, finishing wizard")
                 return await self._finish()
 
@@ -650,6 +686,10 @@ class VAVFlowMixin:
                     CONF_MAX_CORRECTION_SECONDS,
                     default=d.get(CONF_MAX_CORRECTION_SECONDS, DEFAULT_MAX_CORRECTION_SECONDS),
                 ): _number(MIN_CORRECTION_SECONDS, MAX_CORRECTION_SECONDS_LIMIT, 1, "s"),
+                vol.Required(
+                    CONF_BOOST_MINUTES,
+                    default=d.get(CONF_BOOST_MINUTES, DEFAULT_BOOST_MINUTES),
+                ): _number(MIN_BOOST_MINUTES, MAX_BOOST_MINUTES, 1, "min"),
             }
         )
         return self.async_show_form(  # type: ignore[attr-defined]

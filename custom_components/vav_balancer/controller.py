@@ -13,6 +13,7 @@ from homeassistant.const import STATE_OFF, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, HomeAssistant, State, callback
 from homeassistant.helpers.event import (
     EventStateChangedData,
+    async_call_later,
     async_track_state_change_event,
     async_track_time_interval,
 )
@@ -20,6 +21,7 @@ from homeassistant.util import dt as dt_util
 
 from .balancer import BalancePlan, FanInput, FanTarget, balance
 from .const import (
+    CONF_BOOST_MINUTES,
     CONF_EXHAUST_FANS,
     CONF_EXHAUST_PROFILES,
     CONF_INTAKE_FANS,
@@ -34,6 +36,7 @@ from .const import (
     CONF_NIGHT_START,
     CONF_PRESENCE,
     CONF_PRESSURE_TOLERANCE,
+    DEFAULT_BOOST_MINUTES,
     DEFAULT_INTERVAL,
     DEFAULT_MAX_CORRECTION_SECONDS,
     DEFAULT_MIN_AWAY_PCT,
@@ -89,6 +92,14 @@ class VAVController:
         # fan has been both deviated from its target AND not moving at all.
         self._last_level: dict[str, float] = {}
         self._deviation_since: dict[str, datetime] = {}
+        # Boost: force every controllable fan to its ceiling until this
+        # point in time; None when no boost is running.
+        self._boost_until: datetime | None = None
+        self._boost_unsub: Callable[[], None] | None = None
+        # Fans temporarily excluded from balancing at runtime (via the
+        # per-fan pause switch), distinct from the config-time read_only
+        # flag: reversible without reconfiguring the integration.
+        self._paused_fans: set[str] = set()
 
         # Options take precedence over the initial data when present.
         cfg: dict[str, Any] = dict(entry.options) if entry.options else dict(entry.data)
@@ -107,6 +118,7 @@ class VAVController:
         self._max_correction = int(
             cfg.get(CONF_MAX_CORRECTION_SECONDS, DEFAULT_MAX_CORRECTION_SECONDS)
         )
+        self._boost_minutes = float(cfg.get(CONF_BOOST_MINUTES, DEFAULT_BOOST_MINUTES))
 
         self.intake_models = self._load_models(
             cfg.get(CONF_INTAKE_FANS, []), cfg.get(CONF_INTAKE_PROFILES, {}), ROLE_INTAKE
@@ -191,7 +203,84 @@ class VAVController:
         """Unregister every tracker."""
         while self._unsubs:
             self._unsubs.pop()()
+        if self._boost_unsub is not None:
+            self._boost_unsub()
+            self._boost_unsub = None
         self._listeners.clear()
+
+    # ------------------------------------------------------------------
+    # Live-tunable safety parameters (read-only here; changed by the
+    # number platform through a config entry options update + reload, so
+    # they persist across restarts the same way the wizard's values do)
+    # ------------------------------------------------------------------
+    @property
+    def pressure_tolerance(self) -> float:
+        return self._pressure_tolerance
+
+    @property
+    def max_correction_seconds(self) -> int:
+        return self._max_correction
+
+    # ------------------------------------------------------------------
+    # Boost: force every controllable fan to its ceiling for a while
+    # ------------------------------------------------------------------
+    @property
+    def boost_active(self) -> bool:
+        return self._boost_until is not None and dt_util.utcnow() < self._boost_until
+
+    @property
+    def boost_remaining_seconds(self) -> float | None:
+        if self._boost_until is None:
+            return None
+        remaining = (self._boost_until - dt_util.utcnow()).total_seconds()
+        return max(0.0, remaining)
+
+    @callback
+    def async_start_boost(self, minutes: float | None = None) -> None:
+        """Force every controllable fan to its ceiling for `minutes`."""
+        duration = minutes if minutes is not None else self._boost_minutes
+        if self._boost_unsub is not None:
+            self._boost_unsub()
+        self._boost_until = dt_util.utcnow() + timedelta(minutes=duration)
+        self._boost_unsub = async_call_later(
+            self.hass, timedelta(minutes=duration), self._handle_boost_end
+        )
+        _LOGGER.info("Boost started for %.1f minute(s)", duration)
+        self._recalculate("boost started")
+
+    @callback
+    def async_cancel_boost(self) -> None:
+        """End an active boost immediately, if one is running."""
+        if self._boost_until is None:
+            return
+        if self._boost_unsub is not None:
+            self._boost_unsub()
+            self._boost_unsub = None
+        self._boost_until = None
+        _LOGGER.info("Boost cancelled")
+        self._recalculate("boost cancelled")
+
+    @callback
+    def _handle_boost_end(self, now: datetime) -> None:
+        self._boost_unsub = None
+        self._boost_until = None
+        _LOGGER.info("Boost ended")
+        self._recalculate("boost ended")
+
+    # ------------------------------------------------------------------
+    # Per-fan runtime pause (reversible without reconfiguring)
+    # ------------------------------------------------------------------
+    def is_paused(self, entity_id: str) -> bool:
+        return entity_id in self._paused_fans
+
+    @callback
+    def async_set_paused(self, entity_id: str, paused: bool) -> None:
+        if paused:
+            self._paused_fans.add(entity_id)
+        else:
+            self._paused_fans.discard(entity_id)
+        _LOGGER.info("%s %s", entity_id, "paused" if paused else "resumed")
+        self._recalculate("fan paused" if paused else "fan resumed")
 
     # ------------------------------------------------------------------
     # Entity plumbing
@@ -397,11 +486,12 @@ class VAVController:
                 model.entity_id,
             )
 
-        if model.read_only:
-            # Autonomous fan: never commanded. Its *current real* level is
-            # pinned as floor == ceiling == demand, so the balancer counts
-            # its actual airflow towards the total but never tries to move
-            # it; the other, controllable fans adjust around it.
+        if model.read_only or model.entity_id in self._paused_fans:
+            # Autonomous (config-time) or paused (runtime, reversible): not
+            # commanded either way. Its *current real* level is pinned as
+            # floor == ceiling == demand, so the balancer counts its actual
+            # airflow towards the total but never tries to move it; the
+            # other, controllable fans adjust around it.
             self._rule_debug[model.entity_id] = []
             if not available:
                 return FanInput(model, False, None, 0.0, 0.0, 0.0)
@@ -433,10 +523,15 @@ class VAVController:
             ceiling = model.day_max
         ceiling = model.clamp(ceiling)
         floor = model.clamp(self._min_level(model), ceiling)
-        demand = model.clamp(max(floor, rule_level or 0.0), ceiling)
+        if self.boost_active:
+            # Force to the ceiling; the balancer still converges intake and
+            # exhaust around each other normally from there.
+            demand = ceiling
+        else:
+            demand = model.clamp(max(floor, rule_level or 0.0), ceiling)
         _LOGGER.debug(
-            "Demand %s: rule=%s floor=%.1f ceiling=%.1f -> demand=%.1f",
-            model.entity_id, rule_level, floor, ceiling, demand,
+            "Demand %s: rule=%s floor=%.1f ceiling=%.1f boost=%s -> demand=%.1f",
+            model.entity_id, rule_level, floor, ceiling, self.boost_active, demand,
         )
         return FanInput(model, available, rule_level, floor, ceiling, demand)
 
@@ -598,8 +693,8 @@ class VAVController:
             targets = [*self.plan.intake.values(), *self.plan.exhaust.values()]
             for target in targets:
                 model = self._models[target.entity_id]
-                if model.read_only:
-                    # Autonomous fan: only ever read, never commanded.
+                if model.read_only or model.entity_id in self._paused_fans:
+                    # Autonomous or paused: only ever read, never commanded.
                     continue
                 state = self.hass.states.get(model.entity_id)
                 current = self._read_level(model, state)
@@ -791,6 +886,9 @@ class VAVController:
             "interval_seconds": self.interval,
             "pressure_tolerance_m3h": self._pressure_tolerance,
             "max_correction_seconds": self._max_correction,
+            "boost_active": self.boost_active,
+            "boost_remaining_seconds": self.boost_remaining_seconds,
+            "paused_fans": sorted(self._paused_fans),
             "last_reason": self.last_reason,
             "last_calculation": self.last_calculation.isoformat()
             if self.last_calculation else None,
@@ -813,6 +911,7 @@ class VAVController:
                         "ceiling": t.ceiling,
                         "available": t.available,
                         "read_only": self._models[k].read_only,
+                        "paused": k in self._paused_fans,
                         "stuck_seconds": self.stuck_seconds_for(k),
                         "rules": self.rule_debug_for(k),
                     }

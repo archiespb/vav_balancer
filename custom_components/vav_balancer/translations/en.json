@@ -87,11 +87,23 @@
           "night_end": "Night end (input_datetime)",
           "interval": "Hardware command interval (s)",
           "pressure_tolerance": "Pressure tolerance, m³/h",
-          "max_correction_seconds": "Max correction time, s"
+          "max_correction_seconds": "Max correction time, s",
+          "boost_minutes": "Boost duration, min"
         },
         "data_description": {
           "pressure_tolerance": "When intake is already at its ceiling and actual exhaust still outruns actual intake by more than this, exhaust fans are paced to close the gap immediately instead of the normal gradual ramp.",
-          "max_correction_seconds": "If a fan's real output has not moved at all for this long while it still deviates from its target, force it straight to a safe level, bypassing the normal gradual ramp."
+          "max_correction_seconds": "If a fan's real output has not moved at all for this long while it still deviates from its target, force it straight to a safe level, bypassing the normal gradual ramp.",
+          "boost_minutes": "Default duration of the boost button/service: forces every controllable fan to its ceiling, then reverts automatically."
+        }
+      },
+      "fan_template": {
+        "title": "Airflow map starting point",
+        "description": "Optional: pick a starting point for the airflow map of {role} fan **{fan}**. You can still edit every value on the next screen before saving -- this only prefills it.",
+        "data": {
+          "template": "Template"
+        },
+        "data_description": {
+          "template": "\"Tion 4S\" is this project's own observed real-world curve; the \"Generic\" options are placeholders by step count, not verified device specs -- adjust them to your actual hardware."
         }
       }
     },
@@ -210,11 +222,23 @@
           "night_end": "Night end (input_datetime)",
           "interval": "Hardware command interval (s)",
           "pressure_tolerance": "Pressure tolerance, m³/h",
-          "max_correction_seconds": "Max correction time, s"
+          "max_correction_seconds": "Max correction time, s",
+          "boost_minutes": "Boost duration, min"
         },
         "data_description": {
           "pressure_tolerance": "When intake is already at its ceiling and actual exhaust still outruns actual intake by more than this, exhaust fans are paced to close the gap immediately instead of the normal gradual ramp.",
-          "max_correction_seconds": "If a fan's real output has not moved at all for this long while it still deviates from its target, force it straight to a safe level, bypassing the normal gradual ramp."
+          "max_correction_seconds": "If a fan's real output has not moved at all for this long while it still deviates from its target, force it straight to a safe level, bypassing the normal gradual ramp.",
+          "boost_minutes": "Default duration of the boost button/service: forces every controllable fan to its ceiling, then reverts automatically."
+        }
+      },
+      "fan_template": {
+        "title": "Airflow map starting point",
+        "description": "Optional: pick a starting point for the airflow map of {role} fan **{fan}**. You can still edit every value on the next screen before saving -- this only prefills it.",
+        "data": {
+          "template": "Template"
+        },
+        "data_description": {
+          "template": "\"Tion 4S\" is this project's own observed real-world curve; the \"Generic\" options are placeholders by step count, not verified device specs -- adjust them to your actual hardware."
         }
       }
     },
@@ -255,6 +279,13 @@
         "inactive": "Treat as inactive (neutral)",
         "active": "Treat as active (safety output)"
       }
+    },
+    "airflow_template": {
+      "options": {
+        "tion_4s": "Tion 4S / Lite (0,30,45,60,75,90,140)",
+        "generic_4step": "Generic 4-step starting point (0,30,60,90)",
+        "generic_6step": "Generic 6-step starting point (0,20,40,60,80,100)"
+      }
     }
   },
   "entity": {
@@ -294,6 +325,40 @@
       "home_mode": {
         "name": "Home mode"
       }
+    },
+    "button": {
+      "boost": {
+        "name": "Boost"
+      }
+    },
+    "number": {
+      "pressure_tolerance": {
+        "name": "Pressure tolerance"
+      },
+      "max_correction_seconds": {
+        "name": "Max correction time"
+      }
+    },
+    "switch": {
+      "fan_active": {
+        "name": "Active {fan_name}"
+      }
+    }
+  },
+  "services": {
+    "boost": {
+      "name": "Boost",
+      "description": "Force every controllable fan to its ceiling for a while, then revert automatically.",
+      "fields": {
+        "duration": {
+          "name": "Duration",
+          "description": "How long to boost for, in minutes. Defaults to the configured boost duration if omitted."
+        }
+      }
+    },
+    "cancel_boost": {
+      "name": "Cancel boost",
+      "description": "End an active boost immediately and return to normal operation."
     }
   }
 }

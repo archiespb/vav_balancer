@@ -10,11 +10,15 @@ For a quick overview, installation and first setup, see [README.md](README.md).
 - [Sensor rules](#sensor-rules)
 - [Two execution contours](#two-execution-contours)
 - [Read-only fans](#read-only-fans)
+- [Per-fan pause switches](#per-fan-pause-switches)
+- [Boost](#boost)
+- [Live-tunable parameters](#live-tunable-parameters)
 - [Protection against prolonged and excessive imbalance](#protection-against-prolonged-and-excessive-imbalance)
 - [Balancer math](#balancer-math)
 - [Fault tolerance](#fault-tolerance)
 - [Master entity](#master-entity)
 - [Dashboard entities](#dashboard-entities)
+- [Lovelace card](#lovelace-card)
 - [Logging and diagnostics](#logging-and-diagnostics)
 
 ## Config wizard — full step-by-step reference
@@ -30,12 +34,13 @@ Both when first adding the integration and in **Configure** on the integration's
 **Steps repeated for every fan (in a loop, intake first, then exhaust):**
 
 1. *Control type*: **discrete steps** (preset modes) or **smooth percentage** (0-100%). The same form also has a **"Read-only (autonomous fan)"** checkbox.
-2. *Performance*:
-   - steps: airflow in m³/h for every step, comma separated, starting at step 0 (e.g. `0,30,45,60,75,90,140`);
+2. *Airflow map starting point* (step-controlled fans only). An optional template that just prefills the next screen's airflow map field, which stays fully editable — nothing is saved by picking one. "Tion 4S / Lite" is this project's own observed real-world curve; the "Generic" options are placeholders by step count, not verified device specs for any particular brand — adjust them to your actual hardware either way. Leave it unset to start from a blank/default map.
+3. *Performance*:
+   - steps: airflow in m³/h for every step, comma separated, starting at step 0 (e.g. `0,30,45,60,75,90,140`, prefilled from the template if you picked one);
    - percentage: maximum airflow in m³/h at 100%.
 
    The same step also sets the **day ceiling** and **night ceiling** — the highest step or percentage allowed outside and during quiet hours respectively. Empty means no limit; if quiet hours aren't configured globally (see below), only the day ceiling applies.
-3. *Sensor rules* (add as many as you like; leaving the sensor field empty finishes the loop). For a read-only fan, this step and both ceilings are skipped — there is nothing to follow them.
+4. *Sensor rules* (add as many as you like; leaving the sensor field empty finishes the loop). For a read-only fan, this step and both ceilings are skipped — there is nothing to follow them.
 
 **Final step. Global variables:**
 
@@ -43,7 +48,8 @@ Both when first adding the integration and in **Configure** on the integration's
 - "home / away" minimums, separately for step-controlled (in steps) and percentage-controlled (in %) fans;
 - two `input_datetime` entities bounding the night window (set both or neither);
 - hardware command interval, in seconds (5-3600);
-- **pressure tolerance** (m³/h) and **max correction time** (s) — see "Protection against prolonged imbalance" below.
+- **pressure tolerance** (m³/h) and **max correction time** (s) — see "Protection against prolonged imbalance" below; also exposed as live-adjustable `number` entities, see "Live-tunable parameters";
+- **boost duration** (minutes) — the default length of a boost triggered from the button or the `vav_balancer.boost` service without an explicit duration, see "Boost".
 
 All of this can be changed later via **Configure** on the integration's card (`OptionsFlow`) → **Configure step by step**. The wizard replays with the stored values pre-filled, existing rules are kept (you can tick "Delete stored rules first" to clear them). The integration reloads after saving.
 
@@ -116,6 +122,25 @@ A fan can be marked **autonomous** (read-only) — for example, if it's controll
 - the wizard's "Day/night ceiling" and "Sensor rules" steps are skipped for it — there's nothing to control;
 - if its state is unavailable, it is excluded from the balance like any other unavailable fan (its airflow counts as zero).
 
+## Per-fan pause switches
+
+Every controllable (non-read-only) fan gets a `switch.vav_balancer_active_<object_id>` entity. **On** (the default) means the fan is managed normally; turning it **off** pauses it: the balancer stops commanding it, but its current real output still counts towards the overall balance, exactly like a read-only fan — the difference is that a pause is a *runtime* toggle, reversible from the dashboard or an automation at any moment, without touching the stored configuration or reloading the integration. Useful for temporarily taking one fan out of the loop (maintenance, a noisy room at night, manual control for a bit) without redoing the wizard.
+
+A paused fan's target is pinned to its own current actual level (same mechanics as read-only, see above), so the other fans in its role adjust around it rather than trying to compensate for a sudden "hole" in the balance.
+
+## Boost
+
+A `button.vav_balancer_boost` entity forces every controllable, non-paused fan to its own ceiling for the configured **boost duration** (set in the wizard's global step, default 15 minutes), then automatically reverts to normal operation. Two services give automations finer control:
+
+- **`vav_balancer.boost`** — optional `duration` field (minutes) to override the configured default for this one call;
+- **`vav_balancer.cancel_boost`** — ends an active boost immediately.
+
+Boost works by forcing each fan's *demand* to its ceiling — it does not bypass the balancer's own safety invariant. If, for example, a single intake fan can only supply 140 m³/h while the exhaust fan's ceiling corresponds to 550 m³/h, boost still won't let exhaust exceed the 140 m³/h intake can actually deliver: the usual positive-pressure protection (see below) still applies throughout a boost. The master entity's `boost_active` and `boost_remaining_seconds` attributes reflect the current state.
+
+## Live-tunable parameters
+
+`pressure_tolerance` and `max_correction_seconds` (see "Protection against prolonged imbalance" below) are also exposed as `number.vav_balancer_pressure_tolerance` and `number.vav_balancer_max_correction_time`. Changing either one writes it into the config entry's options — the same place the wizard's global step writes to — so Home Assistant reloads the integration to apply it; the new value then persists across restarts exactly like any other wizard-set value, rather than only living in memory until the next restart.
+
 ## Protection against prolonged and excessive imbalance
 
 The balancer's primary goal is to keep intake and exhaust at roughly ±0 of each other, with a small acceptable excess of intake over exhaust (never the other way round). Independent fans physically ramp at different speeds (steps move by 1 per tick, percentages by 5% per tick, and non-linearly along the airflow map on top of that), so even with a perfectly computed target, a naive independent gradual ramp on each side can let actual intake and actual exhaust drift apart for several minutes, in either direction. To prevent that, exhaust fan execution is **synchronized to the real, current intake**, not only to its own final target.
@@ -168,7 +193,7 @@ The target delta (`target_delta_m3h`) converges towards 0. An exact zero is reac
 - **on** — the controller sends commands to the fans;
 - **off** — calculation only (Contour 1); Contour 2 sends nothing. The state is restored after a restart.
 
-Main attributes: `target_intake_m3h`, `target_exhaust_m3h`, `requested_exhaust_m3h`, `target_delta_m3h`, `actual_intake_m3h`, `actual_exhaust_m3h`, `actual_delta_m3h`, `night_mode`, `home_mode`, `pressure_tolerance_m3h`, `max_correction_seconds`, `intake_targets`, `exhaust_targets` (level, airflow, demand, ceiling, `read_only`, `stuck_seconds`, **and the list of rules with their current thresholds**, per fan), `notes`, `last_reason`, `last_calculation`, `last_execution`, `last_commands`.
+Main attributes: `target_intake_m3h`, `target_exhaust_m3h`, `requested_exhaust_m3h`, `target_delta_m3h`, `actual_intake_m3h`, `actual_exhaust_m3h`, `actual_delta_m3h`, `night_mode`, `home_mode`, `pressure_tolerance_m3h`, `max_correction_seconds`, `boost_active`, `boost_remaining_seconds`, `paused_fans` (list of entity ids currently paused via their switch), `intake_targets`, `exhaust_targets` (level, airflow, demand, ceiling, `read_only`, `paused`, `stuck_seconds`, **and the list of rules with their current thresholds**, per fan), `notes`, `last_reason`, `last_calculation`, `last_execution`, `last_commands`.
 
 ## Dashboard entities
 
@@ -203,6 +228,19 @@ Exact `entity_id`s depend on how Home Assistant resolves name collisions — che
 ### Dashboard example
 
 `dashboard_example.yaml` is included: a manual-mode Lovelace YAML view with a `history-graph` card (target/actual intake and exhaust, pressure delta), a `glance` card for the modes, and a `markdown` card that reads a target sensor's `rules` attribute through Jinja and builds a "sensor → threshold → source → output → active" table for one fan. Before using it, replace the `<object_id>` placeholder with your fans' real `entity_id` parts.
+
+## Lovelace card
+
+The integration ships a self-contained custom card (`www/vav-balancer-card.js`) and registers it automatically as a Lovelace resource on startup — no manual resource setup needed, as long as the `frontend` component is loaded (true for virtually every normal installation; a headless/API-only instance without frontend simply won't get the card, with no effect on the integration itself). It shows target/actual intake and exhaust as bars, the pressure delta, and a clickable per-fan list that expands to that fan's active rules.
+
+Add it to a dashboard in YAML mode:
+
+```yaml
+type: vav-balancer-card
+entity: fan.vav_balancer
+```
+
+Or through the UI: **Edit dashboard → Add card → search "VAV Balancer"**. The card has one required option, `entity` (the master `fan.vav_balancer` entity), and one optional one, `boost_entity`, if the automatic boost-button lookup doesn't find yours (e.g. you renamed it).
 
 ## Logging and diagnostics
 

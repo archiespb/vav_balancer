@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "vav_balancer"
-PLATFORMS: Final = ["fan", "sensor", "binary_sensor"]
+PLATFORMS: Final = ["fan", "sensor", "binary_sensor", "number", "switch", "button"]
 DEFAULT_NAME: Final = "VAV Balancer"
 
 # ---------------------------------------------------------------------------
@@ -56,6 +56,7 @@ CONF_NIGHT_END: Final = "night_end"
 CONF_INTERVAL: Final = "interval"
 CONF_PRESSURE_TOLERANCE: Final = "pressure_tolerance"
 CONF_MAX_CORRECTION_SECONDS: Final = "max_correction_seconds"
+CONF_BOOST_MINUTES: Final = "boost_minutes"  # default duration of button.boost
 
 # ---------------------------------------------------------------------------
 # Fan profile keys
@@ -124,6 +125,11 @@ MAX_RULE_DELAY: Final = 7200
 DEFAULT_RULE_HYSTERESIS: Final = 0.0
 MAX_RULE_HYSTERESIS: Final = 1000.0
 
+# Boost: temporarily force every controllable fan to its ceiling.
+DEFAULT_BOOST_MINUTES: Final = 15
+MIN_BOOST_MINUTES: Final = 1
+MAX_BOOST_MINUTES: Final = 240
+
 SENSOR_DOMAINS: Final = [
     "sensor",
     "binary_sensor",
@@ -133,6 +139,18 @@ SENSOR_DOMAINS: Final = [
 ]
 # Domains allowed as a dynamic threshold source (numeric only).
 NUMERIC_SENSOR_DOMAINS: Final = ["sensor", "input_number", "number"]
+
+# Starting points offered in the wizard for a step-controlled fan's
+# airflow map, purely to save typing -- NOT verified manufacturer specs
+# except where noted, always editable before the step is submitted.
+#   "tion_4s" comes from this project's own real-world configuration
+#   (observed and used across many real sessions); the "generic_*" entries
+#   are just reasonable placeholders by step count, not real device data.
+AIRFLOW_TEMPLATES: Final = {
+    "tion_4s": "0,30,45,60,75,90,140",
+    "generic_4step": "0,30,60,90",
+    "generic_6step": "0,20,40,60,80,100",
+}
 
 # Slew-rate limits per execution tick
 STEP_SLEW: Final = 1

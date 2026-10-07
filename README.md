@@ -18,7 +18,7 @@
 
 A generic, asynchronous intake/exhaust ventilation (VAV — Variable Air Volume) balancer with full step-by-step UI configuration. The integration isn't tied to specific rooms, fan models, or sensor types: intake and exhaust are assembled from whichever `fan` entities already exist in your Home Assistant, and their behaviour is defined entirely through the config wizard — no YAML required.
 
-Highlights: any number of intake and exhaust fans (step- or percentage-controlled), sensor rules with dynamic thresholds (including another sensor's live value as the threshold), debounce and hysteresis against chattering at a threshold, day/night ceilings, a "read-only" mode for autonomous fans, continuous intake↔exhaust balance with protection against imbalance, configuration export/import, ready-made sensors for dashboard graphs, and one-click diagnostics.
+Highlights: any number of intake and exhaust fans (step- or percentage-controlled), sensor rules with dynamic thresholds (including another sensor's live value as the threshold), debounce and hysteresis against chattering at a threshold, day/night ceilings with ready-made airflow-map templates, a "read-only" mode for autonomous fans plus runtime pause switches for any other fan, continuous intake↔exhaust balance with protection against imbalance, a boost button/service for temporary full-speed ventilation, live-tunable safety parameters, configuration export/import, ready-made sensors and a bundled Lovelace card for the dashboard, and one-click diagnostics.
 
 Full details on every mechanism are in **[DOCS.md](DOCS.md)**.
 
@@ -63,6 +63,11 @@ If you need the configuration to set up another instance, export it before delet
 | `custom_components/vav_balancer/sensor.py` | Performance sensors for dashboard graphs |
 | `custom_components/vav_balancer/binary_sensor.py` | "Night mode" / "home mode" sensors |
 | `custom_components/vav_balancer/diagnostics.py` | Diagnostics export |
+| `custom_components/vav_balancer/button.py` | Boost button |
+| `custom_components/vav_balancer/number.py` | Live-tunable `pressure_tolerance` / `max_correction_seconds` |
+| `custom_components/vav_balancer/switch.py` | Per-fan runtime pause switches |
+| `custom_components/vav_balancer/services.yaml` | `vav_balancer.boost` / `vav_balancer.cancel_boost` service definitions |
+| `custom_components/vav_balancer/www/vav-balancer-card.js` | Bundled Lovelace card |
 | `custom_components/vav_balancer/config_flow.py` | Config wizard, `OptionsFlowHandler`, export/import |
 | `custom_components/vav_balancer/translations/` | UI strings (en, ru) |
 | `tests/` | `pytest` suite (see [CONTRIBUTING.md](CONTRIBUTING.md)) |
