@@ -165,6 +165,15 @@ This guards against a scenario where something (a `preset_modes` count mismatch,
 
 Both mechanisms are visible in the master entity's and the target-flow sensors' attributes: `stuck_seconds` — how long a fan has been "stuck" (`null` if it's converging normally).
 
+### Startup safety (after a Home Assistant restart)
+
+Right after a full Home Assistant restart, some integrations (cloud-polled devices, a Zigbee mesh still re-joining, etc.) can take seconds to minutes to report their real state again. Two independent protections keep the balancer from acting on stale/missing data during that window:
+
+- **Startup grace period** (`startup_grace_seconds`, 60s by default). Contour 1 (calculation) still runs immediately, so the master entity's attributes are meaningful from the first second, but Contour 2 (the hardware tick) only *arms* once Home Assistant reports `EVENT_HOMEASSISTANT_STARTED`, and then withholds every hardware command for a further `startup_grace_seconds` on top of that. This is exactly the fix for a reported bug where a fan's real demand was still high after a restart, but the controller lowered it anyway because the driving sensor (or the fan itself) hadn't reported its real state yet.
+- **Unknown vs. zero.** A fan whose state can't be read right now is no longer treated as "0 m³/h" for the purposes of the pressure-pacing/urgent-correction logic above — the two are different things, and conflating them is what let exhaust fans get paced down (or jumped down, bypassing the gradual ramp) towards an artificial near-zero target during the startup race. While either side's actual airflow isn't fully known, pacing and urgent correction are skipped for that tick; the ordinary slew-limited ramp (or simply no command, if a fan's own state can't be read yet) still applies.
+
+Both are visible on the master entity: `actual_readable` (`false` while some fan's actual level can't be read), `startup_grace_seconds`, `startup_grace_remaining_seconds` (counts down to 0 after Home Assistant starts).
+
 ## Balancer math
 
 1. **Each fan's demand** = `max(presence minimum, rules)`, capped at the night ceiling.
@@ -193,7 +202,7 @@ The target delta (`target_delta_m3h`) converges towards 0. An exact zero is reac
 - **on** — the controller sends commands to the fans;
 - **off** — calculation only (Contour 1); Contour 2 sends nothing. The state is restored after a restart.
 
-Main attributes: `target_intake_m3h`, `target_exhaust_m3h`, `requested_exhaust_m3h`, `target_delta_m3h`, `actual_intake_m3h`, `actual_exhaust_m3h`, `actual_delta_m3h`, `night_mode`, `home_mode`, `pressure_tolerance_m3h`, `max_correction_seconds`, `boost_active`, `boost_remaining_seconds`, `paused_fans` (list of entity ids currently paused via their switch), `intake_targets`, `exhaust_targets` (level, airflow, demand, ceiling, `read_only`, `paused`, `stuck_seconds`, **and the list of rules with their current thresholds**, per fan), `notes`, `last_reason`, `last_calculation`, `last_execution`, `last_commands`.
+Main attributes: `target_intake_m3h`, `target_exhaust_m3h`, `requested_exhaust_m3h`, `target_delta_m3h`, `actual_intake_m3h`, `actual_exhaust_m3h`, `actual_delta_m3h`, `actual_readable`, `night_mode`, `home_mode`, `pressure_tolerance_m3h`, `max_correction_seconds`, `startup_grace_seconds`, `startup_grace_remaining_seconds`, `boost_active`, `boost_remaining_seconds`, `paused_fans` (list of entity ids currently paused via their switch), `intake_targets`, `exhaust_targets` (level, airflow, demand, ceiling, `read_only`, `paused`, `stuck_seconds`, **and the list of rules with their current thresholds**, per fan), `notes`, `last_reason`, `last_calculation`, `last_execution`, `last_commands`.
 
 ## Dashboard entities
 

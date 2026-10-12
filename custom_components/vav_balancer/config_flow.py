@@ -49,6 +49,7 @@ from .const import (
     CONF_PRESENCE,
     CONF_MAX_CORRECTION_SECONDS,
     CONF_PRESSURE_TOLERANCE,
+    CONF_STARTUP_GRACE_SECONDS,
     CONTROL_PERCENTAGE,
     CONTROL_STEPS,
     DEFAULT_BOOST_MINUTES,
@@ -60,6 +61,7 @@ from .const import (
     DEFAULT_MIN_HOME_STEP,
     DEFAULT_NAME,
     DEFAULT_PRESSURE_TOLERANCE,
+    DEFAULT_STARTUP_GRACE_SECONDS,
     DOMAIN,
     FORM_ADD_ANOTHER,
     FORM_RESET_RULES,
@@ -69,10 +71,12 @@ from .const import (
     MAX_PRESSURE_TOLERANCE,
     MAX_RULE_DELAY,
     MAX_RULE_HYSTERESIS,
+    MAX_STARTUP_GRACE_SECONDS,
     MIN_BOOST_MINUTES,
     MIN_CORRECTION_SECONDS,
     MIN_INTERVAL,
     MIN_PRESSURE_TOLERANCE,
+    MIN_STARTUP_GRACE_SECONDS,
     MODE_ABOVE,
     MODE_BELOW,
     MODE_LINEAR,
@@ -113,6 +117,7 @@ _EXPORT_KEYS: tuple[str, ...] = (
     CONF_PRESENCE, CONF_MIN_HOME_STEP, CONF_MIN_AWAY_STEP, CONF_MIN_HOME_PCT,
     CONF_MIN_AWAY_PCT, CONF_NIGHT_START, CONF_NIGHT_END, CONF_INTERVAL,
     CONF_PRESSURE_TOLERANCE, CONF_MAX_CORRECTION_SECONDS, CONF_BOOST_MINUTES,
+    CONF_STARTUP_GRACE_SECONDS,
 )
 
 
@@ -172,9 +177,11 @@ def _validate_full_config(data: Any) -> list[str]:
     _num(CONF_INTERVAL, MIN_INTERVAL, MAX_INTERVAL)
     _num(CONF_PRESSURE_TOLERANCE, MIN_PRESSURE_TOLERANCE, MAX_PRESSURE_TOLERANCE)
     _num(CONF_MAX_CORRECTION_SECONDS, MIN_CORRECTION_SECONDS, MAX_CORRECTION_SECONDS_LIMIT)
-    # Optional: configs exported before this field existed won't have it.
+    # Optional: configs exported before these fields existed won't have them.
     if CONF_BOOST_MINUTES in data:
         _num(CONF_BOOST_MINUTES, MIN_BOOST_MINUTES, MAX_BOOST_MINUTES)
+    if CONF_STARTUP_GRACE_SECONDS in data:
+        _num(CONF_STARTUP_GRACE_SECONDS, MIN_STARTUP_GRACE_SECONDS, MAX_STARTUP_GRACE_SECONDS)
 
     for key in (CONF_PRESENCE, CONF_NIGHT_START, CONF_NIGHT_END):
         value = data.get(key)
@@ -648,6 +655,9 @@ class VAVFlowMixin:
                     user_input[CONF_MAX_CORRECTION_SECONDS]
                 )
                 self._data[CONF_BOOST_MINUTES] = float(user_input[CONF_BOOST_MINUTES])
+                self._data[CONF_STARTUP_GRACE_SECONDS] = int(
+                    user_input[CONF_STARTUP_GRACE_SECONDS]
+                )
                 _LOGGER.info("Config flow: global variables stored, finishing wizard")
                 return await self._finish()
 
@@ -690,6 +700,12 @@ class VAVFlowMixin:
                     CONF_BOOST_MINUTES,
                     default=d.get(CONF_BOOST_MINUTES, DEFAULT_BOOST_MINUTES),
                 ): _number(MIN_BOOST_MINUTES, MAX_BOOST_MINUTES, 1, "min"),
+                vol.Required(
+                    CONF_STARTUP_GRACE_SECONDS,
+                    default=d.get(
+                        CONF_STARTUP_GRACE_SECONDS, DEFAULT_STARTUP_GRACE_SECONDS
+                    ),
+                ): _number(MIN_STARTUP_GRACE_SECONDS, MAX_STARTUP_GRACE_SECONDS, 1, "s"),
             }
         )
         return self.async_show_form(  # type: ignore[attr-defined]

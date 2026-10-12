@@ -9,8 +9,13 @@ from math import copysign
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_OFF, STATE_UNAVAILABLE, STATE_UNKNOWN
-from homeassistant.core import Event, HomeAssistant, State, callback
+from homeassistant.const import (
+    EVENT_HOMEASSISTANT_STARTED,
+    STATE_OFF,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+)
+from homeassistant.core import CoreState, Event, HomeAssistant, State, callback
 from homeassistant.helpers.event import (
     EventStateChangedData,
     async_call_later,
@@ -36,6 +41,7 @@ from .const import (
     CONF_NIGHT_START,
     CONF_PRESENCE,
     CONF_PRESSURE_TOLERANCE,
+    CONF_STARTUP_GRACE_SECONDS,
     DEFAULT_BOOST_MINUTES,
     DEFAULT_INTERVAL,
     DEFAULT_MAX_CORRECTION_SECONDS,
@@ -44,6 +50,7 @@ from .const import (
     DEFAULT_MIN_HOME_PCT,
     DEFAULT_MIN_HOME_STEP,
     DEFAULT_PRESSURE_TOLERANCE,
+    DEFAULT_STARTUP_GRACE_SECONDS,
     PERCENT_SLEW,
     ROLE_EXHAUST,
     ROLE_INTAKE,
@@ -69,6 +76,16 @@ class VAVController:
         self.home = True
         self.actual_intake = 0.0
         self.actual_exhaust = 0.0
+        # Whether the last _recalculate() could actually read every tracked
+        # fan's real-world level for this side. True by default (and
+        # whenever a test/caller sets actual_intake/actual_exhaust by hand
+        # without going through _recalculate) so existing direct-attribute
+        # usage keeps behaving exactly as before; _recalculate() is the only
+        # place that ever sets this to False, when a fan genuinely hasn't
+        # reported a readable state yet (most commonly: right after a Home
+        # Assistant restart, before that fan's own integration restores it).
+        self._actual_intake_readable = True
+        self._actual_exhaust_readable = True
         self.last_reason = "not calculated yet"
         self.last_calculation: datetime | None = None
         self.last_execution: datetime | None = None
@@ -100,6 +117,11 @@ class VAVController:
         # per-fan pause switch), distinct from the config-time read_only
         # flag: reversible without reconfiguring the integration.
         self._paused_fans: set[str] = set()
+        # Contour 2 startup gating (see CONF_STARTUP_GRACE_SECONDS): None
+        # until the hardware tick is actually armed; once set, _async_execute
+        # refuses to send any command until this many seconds have passed.
+        self._contour2_armed = False
+        self._startup_at: datetime | None = None
 
         # Options take precedence over the initial data when present.
         cfg: dict[str, Any] = dict(entry.options) if entry.options else dict(entry.data)
@@ -119,6 +141,9 @@ class VAVController:
             cfg.get(CONF_MAX_CORRECTION_SECONDS, DEFAULT_MAX_CORRECTION_SECONDS)
         )
         self._boost_minutes = float(cfg.get(CONF_BOOST_MINUTES, DEFAULT_BOOST_MINUTES))
+        self._startup_grace_seconds = int(
+            cfg.get(CONF_STARTUP_GRACE_SECONDS, DEFAULT_STARTUP_GRACE_SECONDS)
+        )
 
         self.intake_models = self._load_models(
             cfg.get(CONF_INTAKE_FANS, []), cfg.get(CONF_INTAKE_PROFILES, {}), ROLE_INTAKE
@@ -183,7 +208,27 @@ class VAVController:
         return sorted(tracked)
 
     async def async_start(self) -> None:
-        """Register both contours and run the first calculation."""
+        """Register both contours and run the first calculation.
+
+        Contour 1 (pure calculation, never touches hardware) starts right
+        away -- that's safe even while Home Assistant is still restoring
+        other entities, and keeps the master entity's attributes meaningful
+        from the first second.
+
+        Contour 2 (the throttled hardware tick) is different. Arming its
+        timer immediately on a full Home Assistant restart lets it fire
+        while slower integrations (cloud-polled devices, a Zigbee mesh
+        still re-joining, a sensor that simply hasn't been polled yet)
+        have not reported their real state. _build_input()/_actual_flow()
+        read that as "unavailable"/"0 m3/h", which the positive-pressure
+        safety logic in _async_execute() can act on for real -- jumping a
+        fan down to near nothing in a single, ungoverned step before the
+        real sensor value ever arrives. So the hardware tick itself is
+        only armed once Home Assistant reports it has fully started, and
+        _async_execute() additionally withholds commands for a further
+        configurable grace period on top of that (see
+        CONF_STARTUP_GRACE_SECONDS).
+        """
         self._recalculate("startup")
 
         tracked = self._tracked_entities()
@@ -191,7 +236,51 @@ class VAVController:
         self._unsubs.append(
             async_track_state_change_event(self.hass, tracked, self._handle_state_event)
         )
-        # Contour 2: hardware throttle
+
+        # Deliberately checking hass.state directly rather than the
+        # hass.is_running property: that property is already True during
+        # CoreState.starting, which is exactly the phase a config entry is
+        # set up in on a real restart -- it would make this check arm
+        # Contour 2 immediately every time and never actually wait for
+        # EVENT_HOMEASSISTANT_STARTED, defeating the whole point here.
+        if self.hass.state is CoreState.running:
+            # Either this is not a full HA restart (e.g. the integration
+            # itself was just reloaded) or HA finished starting before this
+            # entry got set up -- either way, there's nothing further to
+            # wait for before arming Contour 2.
+            self._arm_contour2()
+        else:
+            _LOGGER.debug(
+                "Contour 2: Home Assistant is still starting; waiting for "
+                "it to finish before arming the hardware tick"
+            )
+            self._unsubs.append(
+                self.hass.bus.async_listen_once(
+                    EVENT_HOMEASSISTANT_STARTED, self._handle_ha_started
+                )
+            )
+
+    @callback
+    def _handle_ha_started(self, event: Event) -> None:
+        """Home Assistant just finished its startup sequence."""
+        _LOGGER.debug("Contour 2: Home Assistant has started, re-calculating")
+        self._recalculate("ha started")
+        self._arm_contour2()
+
+    @callback
+    def _arm_contour2(self) -> None:
+        """Start the throttled hardware-execution timer (once)."""
+        if self._contour2_armed:
+            return
+        self._contour2_armed = True
+        self._startup_at = dt_util.utcnow()
+        if self._startup_grace_seconds > 0:
+            _LOGGER.info(
+                "Contour 2: armed; withholding hardware commands for a %ss "
+                "startup grace period so slower integrations have time to "
+                "report their real state",
+                self._startup_grace_seconds,
+            )
         self._unsubs.append(
             async_track_time_interval(
                 self.hass, self._handle_tick, timedelta(seconds=self.interval)
@@ -220,6 +309,24 @@ class VAVController:
     @property
     def max_correction_seconds(self) -> int:
         return self._max_correction
+
+    @property
+    def startup_grace_remaining_seconds(self) -> float:
+        """How much longer Contour 2 will withhold hardware commands.
+
+        0 once the grace period has elapsed, or if Contour 2 hasn't
+        armed yet (nothing to count down from until it has).
+        """
+        if self._startup_at is None or self._startup_grace_seconds <= 0:
+            return 0.0
+        elapsed = (dt_util.utcnow() - self._startup_at).total_seconds()
+        return max(0.0, self._startup_grace_seconds - elapsed)
+
+    @property
+    def actual_readable(self) -> bool:
+        """Whether the last calculation could read every tracked fan's
+        real-world level on both sides (see _actual_flow())."""
+        return self._actual_intake_readable and self._actual_exhaust_readable
 
     # ------------------------------------------------------------------
     # Boost: force every controllable fan to its ceiling for a while
@@ -338,8 +445,12 @@ class VAVController:
             intakes = [self._build_input(m) for m in self.intake_models]
             exhausts = [self._build_input(m) for m in self.exhaust_models]
             self.plan = balance(intakes, exhausts)
-            self.actual_intake = self._actual_flow(self.intake_models)
-            self.actual_exhaust = self._actual_flow(self.exhaust_models)
+            self.actual_intake, self._actual_intake_readable = (
+                self._actual_flow(self.intake_models)
+            )
+            self.actual_exhaust, self._actual_exhaust_readable = (
+                self._actual_flow(self.exhaust_models)
+            )
             self.last_reason = reason
             self.last_calculation = dt_util.utcnow()
             _LOGGER.debug(
@@ -599,13 +710,27 @@ class VAVController:
         pct = attrs.get("percentage")
         return float(pct) if pct is not None else None
 
-    def _actual_flow(self, models: list[FanModel]) -> float:
+    def _actual_flow(self, models: list[FanModel]) -> tuple[float, bool]:
+        """Sum real-world airflow across `models`.
+
+        Returns (total, all_readable). all_readable is False as soon as
+        any one fan's level can't be read right now (unavailable/unknown
+        state) -- a genuinely 0 actual flow is a VALUE, not the absence of
+        one, and the two must not be conflated: _async_execute()'s
+        pressure-pacing/urgent-correction logic depends on knowing which
+        case this is, since treating "don't know yet" as "0 m3/h" is what
+        let a fan get slammed down right after a Home Assistant restart,
+        before its own state had been restored.
+        """
         total = 0.0
+        all_readable = True
         for model in models:
             level = self._read_level(model, self.hass.states.get(model.entity_id))
-            if level is not None:
-                total += model.flow(level)
-        return total
+            if level is None:
+                all_readable = False
+                continue
+            total += model.flow(level)
+        return total, all_readable
 
     # ------------------------------------------------------------------
     # Contour 2: throttled hardware execution
@@ -637,6 +762,17 @@ class VAVController:
             return
 
         now = dt_util.utcnow()
+
+        if self._startup_at is not None and self._startup_grace_seconds > 0:
+            elapsed = (now - self._startup_at).total_seconds()
+            if elapsed < self._startup_grace_seconds:
+                _LOGGER.debug(
+                    "Contour 2: startup grace period (%.0f/%ss elapsed), "
+                    "withholding hardware commands this tick",
+                    elapsed, self._startup_grace_seconds,
+                )
+                return
+
         intake_actual = self.actual_intake
 
         # Exhaust fans must track *actual* intake within tolerance at every
@@ -649,44 +785,70 @@ class VAVController:
         # sensor flipping on) no longer lets exhaust jump straight to a
         # target that assumes intake has *already* reached a ceiling it is
         # still several slew-limited ticks away from, in either direction.
-        exhaust_targets = list(self.plan.exhaust.values())
-        combined_target_flow = sum(t.flow for t in exhaust_targets)
-        band_lo = intake_actual - self._pressure_tolerance
-        band_hi = intake_actual + self._pressure_tolerance
-        combined_goal_flow = min(max(combined_target_flow, band_lo), band_hi)
-        exhaust_scale = (
-            combined_goal_flow / combined_target_flow
-            if combined_target_flow > 1e-9 else 1.0
-        )
-        if abs(exhaust_scale - 1.0) > 1e-6:
-            _LOGGER.debug(
-                "Contour 2: pacing exhaust to actual intake %.1f m3/h "
-                "(+/-%.1f): combined target %.1f -> goal %.1f (scale %.3f)",
-                intake_actual, self._pressure_tolerance,
-                combined_target_flow, combined_goal_flow, exhaust_scale,
-            )
-
-        # Even with the goal itself kept in band, *reaching* it via the
-        # ordinary +/-5%/+/-1-step slew can still take several minutes for a
-        # large, sudden demand swing. Once the actual delta is already
-        # outside tolerance, close that gap immediately rather than
-        # gradually: jumping straight to `goal_level` (not the raw
-        # long-run `target.level`) is always safe, because the goal is
-        # already bounded to within tolerance of actual intake above.
-        exhaust_urgent = (
-            abs(intake_actual - self.actual_exhaust) > self._pressure_tolerance
-        )
-        ukey = "exhaust_urgent"
-        if exhaust_urgent:
+        #
+        # This whole mechanism depends on knowing *real* actual intake and
+        # exhaust flow. If either side's actual flow could not be fully
+        # read this tick (some fan hasn't reported a readable state yet —
+        # typically true in the first seconds/minutes after a Home
+        # Assistant restart, before that fan's own integration restores
+        # it), _actual_flow() cannot tell "truly 0 m3/h" apart from "don't
+        # know yet". Treating "don't know yet" as 0 here is exactly what
+        # used to make exhaust fans get paced down to near nothing, and
+        # then jumped there without the normal slew limit via
+        # exhaust_urgent below, on the very first tick after a restart.
+        # So: skip both the pacing and the urgent-correction shortcut for
+        # this tick and fall back to plain slew-limited movement instead.
+        actual_readable = self._actual_intake_readable and self._actual_exhaust_readable
+        rkey = "actual_unreadable"
+        if not actual_readable:
             self._warn_once(
-                ukey,
-                "Contour 2: actual delta is %.1f m3/h (beyond +/-%.1f "
-                "tolerance); jumping exhaust fans straight to their "
-                "(intake-paced) goal instead of the normal gradual ramp",
-                intake_actual - self.actual_exhaust, self._pressure_tolerance,
+                rkey,
+                "Contour 2: actual airflow is not fully known yet (a fan "
+                "hasn't reported a readable state); skipping pressure "
+                "pacing and urgent correction this tick",
             )
+            exhaust_scale = 1.0
+            exhaust_urgent = False
         else:
-            self._clear_warning(ukey)
+            self._clear_warning(rkey)
+            exhaust_targets = list(self.plan.exhaust.values())
+            combined_target_flow = sum(t.flow for t in exhaust_targets)
+            band_lo = intake_actual - self._pressure_tolerance
+            band_hi = intake_actual + self._pressure_tolerance
+            combined_goal_flow = min(max(combined_target_flow, band_lo), band_hi)
+            exhaust_scale = (
+                combined_goal_flow / combined_target_flow
+                if combined_target_flow > 1e-9 else 1.0
+            )
+            if abs(exhaust_scale - 1.0) > 1e-6:
+                _LOGGER.debug(
+                    "Contour 2: pacing exhaust to actual intake %.1f m3/h "
+                    "(+/-%.1f): combined target %.1f -> goal %.1f (scale %.3f)",
+                    intake_actual, self._pressure_tolerance,
+                    combined_target_flow, combined_goal_flow, exhaust_scale,
+                )
+
+            # Even with the goal itself kept in band, *reaching* it via the
+            # ordinary +/-5%/+/-1-step slew can still take several minutes
+            # for a large, sudden demand swing. Once the actual delta is
+            # already outside tolerance, close that gap immediately rather
+            # than gradually: jumping straight to `goal_level` (not the raw
+            # long-run `target.level`) is always safe, because the goal is
+            # already bounded to within tolerance of actual intake above.
+            exhaust_urgent = (
+                abs(intake_actual - self.actual_exhaust) > self._pressure_tolerance
+            )
+            ukey = "exhaust_urgent"
+            if exhaust_urgent:
+                self._warn_once(
+                    ukey,
+                    "Contour 2: actual delta is %.1f m3/h (beyond +/-%.1f "
+                    "tolerance); jumping exhaust fans straight to their "
+                    "(intake-paced) goal instead of the normal gradual ramp",
+                    intake_actual - self.actual_exhaust, self._pressure_tolerance,
+                )
+            else:
+                self._clear_warning(ukey)
 
         async with self._exec_lock:
             operations: list[tuple[int, FanModel, State, float, float, float]] = []
@@ -898,6 +1060,11 @@ class VAVController:
             "actual_intake_m3h": round(self.actual_intake, 1),
             "actual_exhaust_m3h": round(self.actual_exhaust, 1),
             "actual_delta_m3h": round(self.actual_intake - self.actual_exhaust, 1),
+            "actual_readable": self.actual_readable,
+            "startup_grace_seconds": self._startup_grace_seconds,
+            "startup_grace_remaining_seconds": round(
+                self.startup_grace_remaining_seconds, 1
+            ),
         }
         plan = self.plan
         if plan is not None:

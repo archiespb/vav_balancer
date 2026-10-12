@@ -88,12 +88,14 @@
           "interval": "Hardware command interval (s)",
           "pressure_tolerance": "Pressure tolerance, m³/h",
           "max_correction_seconds": "Max correction time, s",
-          "boost_minutes": "Boost duration, min"
+          "boost_minutes": "Boost duration, min",
+          "startup_grace_seconds": "Startup grace period, s"
         },
         "data_description": {
           "pressure_tolerance": "When intake is already at its ceiling and actual exhaust still outruns actual intake by more than this, exhaust fans are paced to close the gap immediately instead of the normal gradual ramp.",
           "max_correction_seconds": "If a fan's real output has not moved at all for this long while it still deviates from its target, force it straight to a safe level, bypassing the normal gradual ramp.",
-          "boost_minutes": "Default duration of the boost button/service: forces every controllable fan to its ceiling, then reverts automatically."
+          "boost_minutes": "Default duration of the boost button/service: forces every controllable fan to its ceiling, then reverts automatically.",
+          "startup_grace_seconds": "After Home Assistant finishes starting, withhold hardware commands for this long so slower integrations (cloud devices, a Zigbee mesh still re-joining...) have time to report their real state before any fan is actually moved."
         }
       },
       "fan_template": {
@@ -223,12 +225,14 @@
           "interval": "Hardware command interval (s)",
           "pressure_tolerance": "Pressure tolerance, m³/h",
           "max_correction_seconds": "Max correction time, s",
-          "boost_minutes": "Boost duration, min"
+          "boost_minutes": "Boost duration, min",
+          "startup_grace_seconds": "Startup grace period, s"
         },
         "data_description": {
           "pressure_tolerance": "When intake is already at its ceiling and actual exhaust still outruns actual intake by more than this, exhaust fans are paced to close the gap immediately instead of the normal gradual ramp.",
           "max_correction_seconds": "If a fan's real output has not moved at all for this long while it still deviates from its target, force it straight to a safe level, bypassing the normal gradual ramp.",
-          "boost_minutes": "Default duration of the boost button/service: forces every controllable fan to its ceiling, then reverts automatically."
+          "boost_minutes": "Default duration of the boost button/service: forces every controllable fan to its ceiling, then reverts automatically.",
+          "startup_grace_seconds": "After Home Assistant finishes starting, withhold hardware commands for this long so slower integrations (cloud devices, a Zigbee mesh still re-joining...) have time to report their real state before any fan is actually moved."
         }
       },
       "fan_template": {

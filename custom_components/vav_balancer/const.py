@@ -57,6 +57,15 @@ CONF_INTERVAL: Final = "interval"
 CONF_PRESSURE_TOLERANCE: Final = "pressure_tolerance"
 CONF_MAX_CORRECTION_SECONDS: Final = "max_correction_seconds"
 CONF_BOOST_MINUTES: Final = "boost_minutes"  # default duration of button.boost
+# How long after Home Assistant reports fully started (EVENT_HOMEASSISTANT_
+# STARTED) Contour 2 waits before sending its first real hardware command.
+# Contour 1 (pure calculation) is unaffected and runs from the first second.
+# This protects against slower integrations (cloud-polled devices, a Zigbee
+# mesh still re-joining, etc.) that have not yet restored their real state:
+# without this grace period, their sensors/fans briefly read as unavailable,
+# which the balancer would otherwise misread as "no demand" / "0 airflow"
+# and act on for real before the real value arrives.
+CONF_STARTUP_GRACE_SECONDS: Final = "startup_grace_seconds"
 
 # ---------------------------------------------------------------------------
 # Fan profile keys
@@ -101,6 +110,11 @@ DEFAULT_MIN_AWAY_PCT: Final = 0.0
 DEFAULT_INTERVAL: Final = 30
 MIN_INTERVAL: Final = 5
 MAX_INTERVAL: Final = 3600
+
+# Startup grace period (see CONF_STARTUP_GRACE_SECONDS above).
+DEFAULT_STARTUP_GRACE_SECONDS: Final = 60
+MIN_STARTUP_GRACE_SECONDS: Final = 0
+MAX_STARTUP_GRACE_SECONDS: Final = 900
 
 # Pressure-safety override: when intake has no more headroom (its targets
 # are already pinned at their ceiling) and actual exhaust still outruns
